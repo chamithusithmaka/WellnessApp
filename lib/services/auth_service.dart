@@ -2,10 +2,14 @@
 // Provides methods for login, register, and logout
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class AuthService {
   // Firebase Auth instance
   final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  // Google Sign In instance
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
 
   // Get current user
   User? get currentUser => _auth.currentUser;
@@ -61,8 +65,41 @@ class AuthService {
     }
   }
 
+  // Sign in with Google
+  // Returns null on success, error message on failure
+  Future<String?> signInWithGoogle() async {
+    try {
+      // Trigger the Google Sign-In flow
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+
+      // User cancelled the sign-in
+      if (googleUser == null) {
+        return 'Google sign-in was cancelled';
+      }
+
+      // Obtain the auth details from the request
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+
+      // Create a new credential
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      // Sign in to Firebase with the Google credential
+      await _auth.signInWithCredential(credential);
+
+      return null; // Success - no error
+    } on FirebaseAuthException catch (e) {
+      return _getErrorMessage(e.code);
+    } catch (e) {
+      return 'Failed to sign in with Google. Please try again.';
+    }
+  }
+
   // Logout current user
   Future<void> logout() async {
+    await _googleSignIn.signOut();
     await _auth.signOut();
   }
 

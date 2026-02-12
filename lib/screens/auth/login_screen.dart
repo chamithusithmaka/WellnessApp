@@ -80,6 +80,23 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
+  // // Handle Google Sign-In
+  // Future<void> _signInWithGoogle() async {
+  //   setState(() {
+  //     _isLoading = true;
+  //     _errorMessage = null;
+  //   });
+
+  //   final error = await _authService.signInWithGoogle();
+
+  //   setState(() {
+  //     _isLoading = false;
+  //     _errorMessage = error;
+  //   });
+
+  //   // If successful, AuthWrapper will automatically navigate to home
+  // }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -248,6 +265,58 @@ class _LoginScreenState extends State<LoginScreen> {
                     ],
                   ),
                 ),
+                // // Google Sign-In Section - Commented out until OAuth is configured
+                // const SizedBox(height: 24),
+                // // Divider with "OR"
+                // Row(
+                //   children: [
+                //     Expanded(child: Divider(color: Colors.grey[400])),
+                //     Padding(
+                //       padding: const EdgeInsets.symmetric(horizontal: 16),
+                //       child: Text(
+                //         'OR',
+                //         style: TextStyle(
+                //           color: Colors.grey[600],
+                //           fontWeight: FontWeight.w500,
+                //         ),
+                //       ),
+                //     ),
+                //     Expanded(child: Divider(color: Colors.grey[400])),
+                //   ],
+                // ),
+                // const SizedBox(height: 24),
+                // // Google Sign-In Button
+                // SizedBox(
+                //   width: double.infinity,
+                //   child: OutlinedButton.icon(
+                //     onPressed: _isLoading ? null : _signInWithGoogle,
+                //     style: OutlinedButton.styleFrom(
+                //       padding: const EdgeInsets.symmetric(vertical: 14),
+                //       side: BorderSide(color: Colors.grey[300]!),
+                //       shape: RoundedRectangleBorder(
+                //         borderRadius: BorderRadius.circular(8),
+                //       ),
+                //     ),
+                //     icon: Image.network(
+                //       'https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg',
+                //       height: 24,
+                //       width: 24,
+                //       errorBuilder: (context, error, stackTrace) => const Icon(
+                //         Icons.g_mobiledata,
+                //         size: 24,
+                //         color: Colors.red,
+                //       ),
+                //     ),
+                //     label: const Text(
+                //       'Continue with Google',
+                //       style: TextStyle(
+                //         fontSize: 16,
+                //         fontWeight: FontWeight.w500,
+                //         color: Colors.black87,
+                //       ),
+                //     ),
+                //   ),
+                // ),
               ],
             ),
           ),

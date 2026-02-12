@@ -20,9 +20,15 @@ class _HomeNavigationState extends State<HomeNavigation> {
   // Current selected tab index
   int _currentIndex = 0;
 
-  // List of all screens
-  final List<Widget> _screens = [
-    const HomeScreen(),
+  void _navigateToTab(int index) {
+    setState(() {
+      _currentIndex = index;
+    });
+  }
+
+  // Build screens list as a getter so it can access _navigateToTab
+  List<Widget> get _screens => [
+    HomeScreen(onNavigate: _navigateToTab),
     const JournalScreen(),
     const ChatScreen(),
     const MoodScreen(),
@@ -39,11 +45,7 @@ class _HomeNavigationState extends State<HomeNavigation> {
       // Bottom navigation bar
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
-        onDestinationSelected: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
+        onDestinationSelected: _navigateToTab,
         destinations: const [
           // Home tab
           NavigationDestination(

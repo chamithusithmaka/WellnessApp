@@ -13,48 +13,39 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # Firebase
-  firebase_core: ^3.13.0
-  firebase_auth: ^5.5.4
-  cloud_firestore: ^5.6.6
+  # Firebase packages
+  firebase_core: ^3.8.1
+  firebase_auth: ^5.3.4
+  cloud_firestore: ^5.6.0
   google_sign_in: ^6.2.2
 
-  # Local Database
-  sqflite: ^2.4.2
-  path: ^1.9.1
+  # Local database
+  sqflite: ^2.4.1
+  path: ^1.9.0
 
-  # State Management
-  provider: ^6.1.4
-
-  # Charts for mood analytics
-  fl_chart: ^1.0.0
-
-  # Audio playback for relaxation
-  just_audio: ^0.9.46
-
-  # Connectivity check for offline/online sync
-  connectivity_plus: ^6.1.4
-
-  # UUID generation for unique IDs
-  uuid: ^4.5.1
-
-  # Date formatting
-  intl: ^0.20.2
-
-  # Icons
-  cupertino_icons: ^1.0.8
-
-  # Shared preferences for simple local storage
-  shared_preferences: ^2.5.3
-
-  # HTTP client for API calls
+  # HTTP requests for AI API
   http: ^1.2.2
 
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
+  # Utilities
+  uuid: ^4.5.1
+  intl: ^0.20.2
+  shared_preferences: ^2.3.4
 
-  flutter_lints: ^5.0.0
+  # Connectivity
+  connectivity_plus: ^6.1.1
+
+  # URL launcher for phone calls
+  url_launcher: ^6.3.1
+
+  # Charts - Updated version
+  fl_chart: ^0.69.0
+
+  # Audio for relaxation
+  just_audio: ^0.9.43
+  audio_session: ^0.1.25
+
+  # The following adds the Cupertino Icons font to your application.
+  cupertino_icons: ^1.0.8
 
 flutter:
   uses-material-design: true

@@ -88,6 +88,16 @@ class JournalEntry {
       isSynced: isSynced ?? this.isSynced,
     );
   }
+
+  // Get emoji for emotion (static method for use in UI)
+  static String getEmoji(String emotion) {
+    return Emotions.getEmoji(emotion);
+  }
+
+  // Get color for emotion (static method for use in UI)
+  static int getColor(String emotion) {
+    return Emotions.getColor(emotion);
+  }
 }
 
 // List of available emotions for the app
