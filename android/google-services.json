@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "225285136657",
+    "project_id": "ai-wellness-app-922f6",
+    "storage_bucket": "ai-wellness-app-922f6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:225285136657:android:4ce2220afaff9ac629acb0",
+        "android_client_info": {
+          "package_name": "com.example.ai_wellness_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBR9pEhx6G3wGpu0F5LI7StrD1EdeCoe0U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
