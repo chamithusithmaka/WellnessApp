@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 // Import Firebase options
 import 'firebase_options.dart';
@@ -13,15 +14,15 @@ import 'screens/auth/login_screen.dart';
 import 'screens/home/home_navigation.dart';
 
 void main() async {
-  // Ensure Flutter is initialized before Firebase
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Initialize Firebase with platform-specific options
+  
+  // Load environment variables
+  await dotenv.load(fileName: ".env");
+  
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Run the app
   runApp(const MyApp());
 }
 

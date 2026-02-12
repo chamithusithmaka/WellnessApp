@@ -4,11 +4,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class OpenRouterService {
-  // OpenRouter API configuration
-  static const String _apiKey =
-      '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';
+  // Get API key from environment variables
+  static String get _apiKey => dotenv.env['OPENROUTER_API_KEY'] ?? '';
+  
   static const String _baseUrl = 'https://openrouter.ai/api/v1/chat/completions';
   static const String _model = 'openai/gpt-4o-mini';
 

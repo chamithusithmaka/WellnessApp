@@ -5,13 +5,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class GeminiService {
-  // Gemini API configuration
-  static const String _apiKey = 'AIzaSyD17ae-RwygstZuWcGZSp2_vz_1A8HdXrw';
-  // gemini-2.5-flash — current stable model
+  // Get API key from environment variables
+  static String get _apiKey => dotenv.env['GEMINI_API_KEY'] ?? '';
+  
   static const String _model = 'gemini-2.5-flash';
-  static const String _baseUrl =
+  static String get _baseUrl =>
       'https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent';
 
   // Compact system prompt — saves tokens on every request

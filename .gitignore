@@ -1,4 +1,7 @@
-
+# Environment variables
+.env
+.env.*
+!.env.example
 
 # Miscellaneous
 *.class
