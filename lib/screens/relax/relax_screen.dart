@@ -334,7 +334,6 @@ class _MeditationSoundsTab extends StatefulWidget {
 class _MeditationSoundsTabState extends State<_MeditationSoundsTab> {
   final AudioPlayer _audioPlayer = AudioPlayer();
   String? _currentlyPlaying;
-  bool _isLoading = false;
 
   // Sound options with asset paths
   final List<Map<String, dynamic>> _sounds = [
@@ -383,39 +382,31 @@ class _MeditationSoundsTabState extends State<_MeditationSoundsTab> {
   }
 
   Future<void> _playSound(String name, String asset) async {
+    // If same sound is playing, stop it
+    if (_currentlyPlaying == name) {
+      await _stopAll();
+      return;
+    }
+
     try {
-      // If same sound is playing, stop it
-      if (_currentlyPlaying == name) {
-        await _audioPlayer.stop();
-        setState(() => _currentlyPlaying = null);
-        return;
-      }
-
-      setState(() => _isLoading = true);
-
-      // Stop current sound
+      // Stop any current sound first
       await _audioPlayer.stop();
+
+      // Update state immediately to show selection
+      setState(() => _currentlyPlaying = name);
 
       // Load and play new sound
       await _audioPlayer.setAsset(asset);
-      _audioPlayer.setLoopMode(LoopMode.one); // Loop the sound
+      _audioPlayer.setLoopMode(LoopMode.one);
       await _audioPlayer.play();
-
-      setState(() {
-        _currentlyPlaying = name;
-        _isLoading = false;
-      });
     } catch (e) {
       debugPrint('Audio error: $e');
-      setState(() {
-        _isLoading = false;
-        _currentlyPlaying = null;
-      });
+      setState(() => _currentlyPlaying = null);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Could not play audio: $name'),
+            content: Text('Could not play: $name'),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
@@ -449,8 +440,7 @@ class _MeditationSoundsTabState extends State<_MeditationSoundsTab> {
                   const SizedBox(width: 12),
                   const Expanded(
                     child: Text(
-                      'Tap a sound to play. Tap again to stop. '
-                      'Sounds will loop until stopped.',
+                      'Tap a sound to play. Tap again to stop.',
                       style: TextStyle(fontSize: 13),
                     ),
                   ),
@@ -460,43 +450,21 @@ class _MeditationSoundsTabState extends State<_MeditationSoundsTab> {
           ),
           const SizedBox(height: 20),
 
-          // Currently playing indicator
+          // Currently playing indicator with stop button
           if (_currentlyPlaying != null) ...[
             Card(
               color: colorScheme.primaryContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.music_note,
-                      color: colorScheme.primary,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Now Playing',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                          Text(
-                            _currentlyPlaying!,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.stop),
-                      onPressed: _stopAll,
-                      tooltip: 'Stop',
-                    ),
-                  ],
+              child: ListTile(
+                leading: Icon(Icons.music_note, color: colorScheme.primary),
+                title: Text(_currentlyPlaying!, style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: const Text('Now Playing'),
+                trailing: FilledButton.icon(
+                  onPressed: _stopAll,
+                  icon: const Icon(Icons.stop),
+                  label: const Text('Stop'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: colorScheme.error,
+                  ),
                 ),
               ),
             ),
@@ -520,12 +488,11 @@ class _MeditationSoundsTabState extends State<_MeditationSoundsTab> {
             childAspectRatio: 1.3,
             children: _sounds.map((sound) {
               final isPlaying = _currentlyPlaying == sound['name'];
-              return _SoundCard(
+              return _SimpleSoundCard(
                 name: sound['name'],
                 icon: sound['icon'],
                 color: sound['color'],
                 isPlaying: isPlaying,
-                isLoading: _isLoading && _currentlyPlaying == null,
                 onTap: () => _playSound(sound['name'], sound['asset']),
               );
             }).toList(),
@@ -562,21 +529,19 @@ class _MeditationSoundsTabState extends State<_MeditationSoundsTab> {
   }
 }
 
-// Sound card widget
-class _SoundCard extends StatelessWidget {
+// Simplified sound card widget
+class _SimpleSoundCard extends StatelessWidget {
   final String name;
   final IconData icon;
   final Color color;
   final bool isPlaying;
-  final bool isLoading;
   final VoidCallback onTap;
 
-  const _SoundCard({
+  const _SimpleSoundCard({
     required this.name,
     required this.icon,
     required this.color,
     required this.isPlaying,
-    required this.isLoading,
     required this.onTap,
   });
 
@@ -584,51 +549,39 @@ class _SoundCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       elevation: isPlaying ? 4 : 1,
-      color: isPlaying ? color.withValues(alpha: 0.15) : null,
+      color: isPlaying ? color.withValues(alpha: 0.2) : null,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(12),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Stack(
-                alignment: Alignment.center,
-                children: [
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.15),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(icon, color: color, size: 28),
-                  ),
-                  if (isPlaying)
-                    SizedBox(
-                      width: 64,
-                      height: 64,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: color,
-                      ),
-                    ),
-                ],
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                  border: isPlaying ? Border.all(color: color, width: 2) : null,
+                ),
+                child: Icon(
+                  isPlaying ? Icons.pause : icon,
+                  color: color,
+                  size: 26,
+                ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               Text(
                 name,
                 style: TextStyle(
                   fontWeight: isPlaying ? FontWeight.bold : FontWeight.w500,
                   color: isPlaying ? color : null,
+                  fontSize: 13,
                 ),
+                textAlign: TextAlign.center,
               ),
-              if (isPlaying)
-                Text(
-                  'Playing',
-                  style: TextStyle(fontSize: 12, color: color),
-                ),
             ],
           ),
         ),
