@@ -1,12 +1,17 @@
 // chat_conversation_screen.dart - Active chat conversation with Serenity AI
 // Provides real-time messaging with the AI emotional support bot
+// Supports offline mode with hardcoded responses and SQLite storage
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../models/chat_message.dart';
 import '../../services/firestore_service.dart';
 import '../../services/gemini_service.dart';
 import '../../services/mood_service.dart';
+import '../../services/database_service.dart';
+import '../../services/connectivity_service.dart';
+import '../../services/offline_response_service.dart';
 import 'package:uuid/uuid.dart';
 import 'package:intl/intl.dart';
 
@@ -28,6 +33,8 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FirestoreService _firestoreService = FirestoreService();
+  final DatabaseService _databaseService = DatabaseService();
+  final ConnectivityService _connectivityService = ConnectivityService();
   final MoodService _moodService = MoodService();
   final FocusNode _focusNode = FocusNode();
 
@@ -35,12 +42,26 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
   bool _isLoading = false;
   bool _isTyping = false;
   bool _conversationSaved = false;
+  bool _isOnline = true;
   late String _conversationId;
+  StreamSubscription<bool>? _connectivitySub;
 
   @override
   void initState() {
     super.initState();
     _conversationId = widget.conversation.id;
+    _isOnline = _connectivityService.isOnline;
+
+    // Listen for connectivity changes
+    _connectivitySub = _connectivityService.onlineStream.listen((online) {
+      if (mounted) {
+        setState(() => _isOnline = online);
+        if (online) {
+          // Auto-sync when internet reconnects
+          _connectivityService.syncPendingData();
+        }
+      }
+    });
 
     if (!widget.isNew) {
       _loadMessages();
@@ -52,26 +73,72 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
 
   @override
   void dispose() {
+    _connectivitySub?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
-  // Load existing messages from Firestore
+  // Load existing messages — tries local SQLite first, then Firestore
   Future<void> _loadMessages() async {
     setState(() => _isLoading = true);
 
     try {
-      final messages = await _firestoreService
+      debugPrint('Chat: Loading messages for conversation $_conversationId');
+
+      // 1) Always load from local SQLite first (instant, works offline)
+      final localMessages = await _databaseService
           .getConversationMessages(_conversationId);
-      setState(() {
-        _messages = messages;
-        _isLoading = false;
-      });
+      debugPrint('Chat: Loaded ${localMessages.length} messages from SQLite');
+
+      if (localMessages.isNotEmpty) {
+        setState(() {
+          _messages = localMessages;
+          _isLoading = false;
+        });
+        _scrollToBottom();
+        return; // Local data is the source of truth
+      }
+
+      // 2) If no local data and online, try Firestore and cache locally
+      if (_isOnline) {
+        final cloudMessages = await _firestoreService
+            .getConversationMessages(_conversationId);
+        debugPrint('Chat: Loaded ${cloudMessages.length} messages from Firestore');
+
+        // Cache to SQLite for future offline access
+        for (var msg in cloudMessages) {
+          await _databaseService.saveChatMessage(msg, isSynced: true);
+        }
+
+        setState(() {
+          _messages = cloudMessages;
+          _isLoading = false;
+        });
+      } else {
+        setState(() => _isLoading = false);
+      }
+
       _scrollToBottom();
     } catch (e) {
+      debugPrint('Chat: ERROR loading messages: $e');
       setState(() => _isLoading = false);
+
+      // Show error to user
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load messages: ${e.toString()}'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: _loadMessages,
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -99,7 +166,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
     });
   }
 
-  // Send user message and get AI response
+  // Send user message and get AI response (online: Gemini, offline: hardcoded)
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty || _isTyping) return;
@@ -123,36 +190,44 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
 
     _scrollToBottom();
 
-    // Save to Firestore in background — don't block the AI response
-    _saveToFirestore(text, userMessage, now);
+    // Save user message to local SQLite immediately (offline-first)
+    _saveLocally(text, userMessage, now);
 
     // Analyze mood from user message and save locally (non-blocking)
     _analyzeMoodFromMessage(text);
 
+    // Check connectivity to decide response source
+    final online = await _connectivityService.checkConnectivity();
+
+    if (online) {
+      // ===== ONLINE: Use Gemini API =====
+      await _getOnlineResponse(text);
+    } else {
+      // ===== OFFLINE: Use hardcoded empathetic responses =====
+      await _getOfflineResponse(text);
+    }
+  }
+
+  // Get AI response from Gemini API (online mode)
+  Future<void> _getOnlineResponse(String text) async {
     // Build conversation history for context
-    // EXCLUDE the current user message — sendMessage() adds it separately
     final historyMessages = _messages.sublist(0, _messages.length - 1);
 
-    // Build history in Gemini format (user/model)
     List<Map<String, String>> history = [];
     for (var m in historyMessages) {
       final role = m.isUser ? 'user' : 'model';
-      // Skip if this would create consecutive same-role messages
       if (history.isNotEmpty && history.last['role'] == role) continue;
       history.add({'role': role, 'text': m.text});
     }
-    // Gemini requires history to start with 'user', not 'model'
     while (history.isNotEmpty && history.first['role'] != 'user') {
       history.removeAt(0);
     }
 
     debugPrint('Chat: Sending message "$text" with ${history.length} history items');
-    debugPrint('Chat: History roles: ${history.map((h) => h['role']).toList()}');
 
     try {
-      // Get AI response via Gemini
       final response = await GeminiService.sendMessage(text, history);
-      debugPrint('Chat: Got response, length: ${response.length}');
+      debugPrint('Chat: Got Gemini response, length: ${response.length}');
 
       final aiMessage = ChatMessage(
         id: const Uuid().v4(),
@@ -167,40 +242,58 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
         _isTyping = false;
       });
 
-      // Save AI response to Firestore (non-blocking)
-      _firestoreService.saveChatMessage(aiMessage).timeout(
+      // Save AI message locally and to Firestore
+      _databaseService.saveChatMessage(aiMessage, isSynced: false);
+      _firestoreService.saveChatMessage(aiMessage).then((_) {
+        _databaseService.markMessageSynced(aiMessage.id);
+      }).timeout(
         const Duration(seconds: 5),
-        onTimeout: () => debugPrint('Firestore: save AI message timed out'),
-      ).catchError((e) => debugPrint('Firestore: save AI message error: $e'));
+        onTimeout: () { debugPrint('Firestore: save AI message timed out'); },
+      ).catchError((e) { debugPrint('Firestore: save AI message error: $e'); });
 
-      // Update conversation's last message with AI reply (non-blocking)
-      _firestoreService.updateConversationLastMessage(
-        _conversationId,
-        response.length > 100 ? '${response.substring(0, 100)}...' : response,
-        aiMessage.timestamp,
-      );
+      // Update conversation last message
+      final preview = response.length > 100 ? '${response.substring(0, 100)}...' : response;
+      _databaseService.updateConversationLastMessage(_conversationId, preview, aiMessage.timestamp);
+      _firestoreService.updateConversationLastMessage(_conversationId, preview, aiMessage.timestamp);
 
       _scrollToBottom();
     } catch (e) {
-      debugPrint('Chat: ERROR getting AI response: $e');
-      setState(() => _isTyping = false);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              e.toString().replaceAll('Exception: ', ''),
-            ),
-            backgroundColor: Theme.of(context).colorScheme.error,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+      debugPrint('Chat: Gemini failed ($e), falling back to offline response');
+      // If Gemini fails (e.g. network drops mid-request), use offline response
+      await _getOfflineResponse(text);
     }
   }
 
-  // Save messages to Firestore in background — never blocks the AI call
-  Future<void> _saveToFirestore(String text, ChatMessage userMessage, DateTime now) async {
+  // Get hardcoded empathetic response (offline mode)
+  Future<void> _getOfflineResponse(String text) async {
+    // Small delay to feel natural
+    await Future.delayed(const Duration(milliseconds: 800));
+
+    final response = OfflineResponseService.getResponse(text);
+
+    final aiMessage = ChatMessage(
+      id: const Uuid().v4(),
+      text: response,
+      sender: 'ai',
+      timestamp: DateTime.now(),
+      conversationId: _conversationId,
+    );
+
+    setState(() {
+      _messages.add(aiMessage);
+      _isTyping = false;
+    });
+
+    // Save offline AI response to SQLite (will sync to Firebase later)
+    _databaseService.saveChatMessage(aiMessage, isSynced: false);
+    final preview = response.length > 100 ? '${response.substring(0, 100)}...' : response;
+    _databaseService.updateConversationLastMessage(_conversationId, preview, aiMessage.timestamp);
+
+    _scrollToBottom();
+  }
+
+  // Save messages locally (SQLite) first — sync to Firebase when online
+  Future<void> _saveLocally(String text, ChatMessage userMessage, DateTime now) async {
     try {
       if (!_conversationSaved) {
         _conversationSaved = true;
@@ -212,35 +305,62 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
           lastMessageAt: now,
           lastMessage: text,
         );
-        await _firestoreService.saveConversation(conversation).timeout(
-          const Duration(seconds: 5),
-          onTimeout: () => debugPrint('Firestore: saveConversation timed out'),
-        );
+
+        // Always save to SQLite first
+        await _databaseService.saveConversation(conversation);
 
         // Save the initial AI greeting if it exists
         for (var msg in _messages) {
           if (msg.sender == 'ai') {
-            await _firestoreService.saveChatMessage(msg).timeout(
-              const Duration(seconds: 5),
-              onTimeout: () => debugPrint('Firestore: saveChatMessage timed out'),
-            );
+            await _databaseService.saveChatMessage(msg);
           }
         }
 
-        // Generate title in background
+        // Generate title locally
         GeminiService.generateTitle(text).then((title) {
-          _firestoreService.updateConversationTitle(_conversationId, title);
+          _databaseService.updateConversationTitle(_conversationId, title);
         });
+
+        // If online, also push to Firestore
+        if (_isOnline) {
+          _firestoreService.saveConversation(conversation).then((_) {
+            _databaseService.markConversationSynced(conversation.id);
+          }).timeout(
+            const Duration(seconds: 5),
+            onTimeout: () { debugPrint('Firestore: saveConversation timed out'); },
+          ).catchError((e) { debugPrint('Firestore: saveConversation error: $e'); });
+
+          for (var msg in _messages) {
+            if (msg.sender == 'ai') {
+              _firestoreService.saveChatMessage(msg).then((_) {
+                _databaseService.markMessageSynced(msg.id);
+              }).catchError((e) { debugPrint('Firestore: save greeting error: $e'); });
+            }
+          }
+
+          GeminiService.generateTitle(text).then((title) {
+            _firestoreService.updateConversationTitle(_conversationId, title);
+          });
+        }
       }
 
-      await _firestoreService.saveChatMessage(userMessage).timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => debugPrint('Firestore: saveChatMessage timed out'),
-      );
+      // Save user message to SQLite
+      await _databaseService.saveChatMessage(userMessage);
+      _databaseService.updateConversationLastMessage(_conversationId, text, now);
 
-      _firestoreService.updateConversationLastMessage(_conversationId, text, now);
+      // If online, also push to Firestore
+      if (_isOnline) {
+        _firestoreService.saveChatMessage(userMessage).then((_) {
+          _databaseService.markMessageSynced(userMessage.id);
+        }).timeout(
+          const Duration(seconds: 5),
+          onTimeout: () { debugPrint('Firestore: saveChatMessage timed out'); },
+        ).catchError((e) { debugPrint('Firestore: saveChatMessage error: $e'); });
+
+        _firestoreService.updateConversationLastMessage(_conversationId, text, now);
+      }
     } catch (e) {
-      debugPrint('Firestore save error (non-blocking): $e');
+      debugPrint('Local save error: $e');
     }
   }
 
@@ -302,6 +422,15 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                   color: colorScheme.primary,
                   fontWeight: FontWeight.w400,
                 ),
+              )
+            else if (!_isOnline)
+              Text(
+                'offline mode',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: colorScheme.error,
+                  fontWeight: FontWeight.w400,
+                ),
               ),
           ],
         ),
@@ -327,6 +456,28 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
       ),
       body: Column(
         children: [
+          // Offline banner
+          if (!_isOnline)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+              color: colorScheme.errorContainer,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.cloud_off, size: 16, color: colorScheme.onErrorContainer),
+                  const SizedBox(width: 6),
+                  Text(
+                    'You\'re offline — messages will sync when reconnected',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colorScheme.onErrorContainer,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // Messages list
           Expanded(
             child: _isLoading
@@ -502,7 +653,11 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
           TextButton(
             onPressed: () {
               Navigator.pop(context); // Close dialog
-              _firestoreService.deleteConversation(_conversationId);
+              // Delete from both SQLite and Firestore
+              _databaseService.deleteConversation(_conversationId);
+              if (_isOnline) {
+                _firestoreService.deleteConversation(_conversationId);
+              }
               Navigator.pop(context); // Go back to chat list
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
