@@ -1,9 +1,13 @@
 // chat_screen.dart - Main Chat Screen with conversation list & active chat
 // Users can talk with Serenity AI for emotional support
+// Supports offline mode — loads from local SQLite first
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../models/chat_message.dart';
 import '../../services/firestore_service.dart';
+import '../../services/database_service.dart';
+import '../../services/connectivity_service.dart';
 import 'package:uuid/uuid.dart';
 import 'package:intl/intl.dart';
 import 'chat_conversation_screen.dart';
@@ -17,6 +21,68 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final FirestoreService _firestoreService = FirestoreService();
+  final DatabaseService _databaseService = DatabaseService();
+  final ConnectivityService _connectivityService = ConnectivityService();
+  
+  List<ChatConversation> _conversations = [];
+  bool _isLoading = true;
+  bool _isOnline = true;
+  StreamSubscription<bool>? _connectivitySub;
+  StreamSubscription<List<ChatConversation>>? _firestoreSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _isOnline = _connectivityService.isOnline;
+    _loadConversations();
+
+    // Listen for connectivity changes
+    _connectivitySub = _connectivityService.onlineStream.listen((online) {
+      if (mounted) {
+        setState(() => _isOnline = online);
+        if (online) {
+          _loadConversations(); // Refresh when back online
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _connectivitySub?.cancel();
+    _firestoreSub?.cancel();
+    super.dispose();
+  }
+
+  // Load conversations — SQLite first, then stream from Firestore if online
+  Future<void> _loadConversations() async {
+    // 1) Load from local SQLite (instant, works offline)
+    try {
+      final local = await _databaseService.getConversations();
+      if (mounted) {
+        setState(() {
+          _conversations = local;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Chat list: Error loading local conversations: $e');
+    }
+
+    // 2) If online, also stream from Firestore for real-time updates
+    if (_isOnline) {
+      _firestoreSub?.cancel();
+      _firestoreSub = _firestoreService.streamConversations().listen((cloudConvos) {
+        if (mounted) {
+          // Merge: cache cloud data locally
+          for (var conv in cloudConvos) {
+            _databaseService.saveConversation(conv, isSynced: true);
+          }
+          setState(() => _conversations = cloudConvos);
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -113,60 +179,51 @@ class _ChatScreenState extends State<ChatScreen> {
 
           // Conversations list
           Expanded(
-            child: StreamBuilder<List<ChatConversation>>(
-              stream: _firestoreService.streamConversations(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final conversations = snapshot.data ?? [];
-
-                if (conversations.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.chat_bubble_outline,
-                          size: 64,
-                          color: colorScheme.outline.withValues(alpha: 0.5),
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _conversations.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.chat_bubble_outline,
+                              size: 64,
+                              color: colorScheme.outline.withValues(alpha: 0.5),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'No conversations yet',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(color: colorScheme.outline),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _isOnline
+                                  ? 'Start a new chat with Serenity!'
+                                  : 'Start a new chat — works offline too!',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(color: colorScheme.outline),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No conversations yet',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(color: colorScheme.outline),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Start a new chat with Serenity!',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(color: colorScheme.outline),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                return ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  itemCount: conversations.length,
-                  itemBuilder: (context, index) {
-                    final convo = conversations[index];
-                    return _ConversationTile(
-                      conversation: convo,
-                      onTap: () => _openConversation(convo),
-                      onDelete: () => _confirmDeleteConversation(convo),
-                    );
-                  },
-                );
-              },
-            ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        itemCount: _conversations.length,
+                        itemBuilder: (context, index) {
+                          final convo = _conversations[index];
+                          return _ConversationTile(
+                            conversation: convo,
+                            onTap: () => _openConversation(convo),
+                            onDelete: () => _confirmDeleteConversation(convo),
+                          );
+                        },
+                      ),
           ),
         ],
       ),
@@ -201,7 +258,7 @@ class _ChatScreenState extends State<ChatScreen> {
           isNew: true,
         ),
       ),
-    );
+    ).then((_) => _loadConversations());
   }
 
   // Open existing conversation
@@ -214,7 +271,7 @@ class _ChatScreenState extends State<ChatScreen> {
           isNew: false,
         ),
       ),
-    );
+    ).then((_) => _loadConversations());
   }
 
   // Confirm delete single conversation
@@ -233,7 +290,11 @@ class _ChatScreenState extends State<ChatScreen> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              _firestoreService.deleteConversation(convo.id);
+              _databaseService.deleteConversation(convo.id);
+              if (_isOnline) {
+                _firestoreService.deleteConversation(convo.id);
+              }
+              _loadConversations(); // Refresh list
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Delete'),
@@ -260,6 +321,13 @@ class _ChatScreenState extends State<ChatScreen> {
             onPressed: () {
               Navigator.pop(context);
               _firestoreService.clearChatHistory();
+              // Also clear local SQLite
+              _databaseService.getConversations().then((convos) {
+                for (var c in convos) {
+                  _databaseService.deleteConversation(c.id);
+                }
+                _loadConversations();
+              });
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Delete All'),
