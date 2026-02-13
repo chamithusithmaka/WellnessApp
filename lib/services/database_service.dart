@@ -1,9 +1,10 @@
 // database_service.dart - Handles SQLite local database operations
-// Used for offline storage of journal entries
+// Used for offline storage of journal entries, chat messages & conversations
 
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/journal_entry.dart';
+import '../models/chat_message.dart';
 
 class DatabaseService {
   // Singleton pattern - only one instance of database
@@ -29,7 +30,7 @@ class DatabaseService {
     // Open/create database
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _createDatabase,
       onUpgrade: _upgradeDatabase,
     );
@@ -60,6 +61,30 @@ class DatabaseService {
         emotionBreakdown TEXT DEFAULT ''
       )
     ''');
+
+    // Create chat messages table (offline-first)
+    await db.execute('''
+      CREATE TABLE chat_messages(
+        id TEXT PRIMARY KEY,
+        text TEXT NOT NULL,
+        sender TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        conversationId TEXT NOT NULL,
+        isSynced INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+
+    // Create conversations table (offline-first)
+    await db.execute('''
+      CREATE TABLE chat_conversations(
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        lastMessageAt TEXT NOT NULL,
+        lastMessage TEXT DEFAULT '',
+        isSynced INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
   }
 
   // Upgrade database when version changes
@@ -75,6 +100,29 @@ class DatabaseService {
           source TEXT DEFAULT 'manual',
           date INTEGER NOT NULL,
           emotionBreakdown TEXT DEFAULT ''
+        )
+      ''');
+    }
+    if (oldVersion < 3) {
+      // Add chat tables for offline-first support
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS chat_messages(
+          id TEXT PRIMARY KEY,
+          text TEXT NOT NULL,
+          sender TEXT NOT NULL,
+          timestamp TEXT NOT NULL,
+          conversationId TEXT NOT NULL,
+          isSynced INTEGER NOT NULL DEFAULT 0
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS chat_conversations(
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          createdAt TEXT NOT NULL,
+          lastMessageAt TEXT NOT NULL,
+          lastMessage TEXT DEFAULT '',
+          isSynced INTEGER NOT NULL DEFAULT 0
         )
       ''');
     }
@@ -212,5 +260,160 @@ class DatabaseService {
     return List.generate(maps.length, (i) {
       return JournalEntry.fromMap(maps[i]);
     });
+  }
+
+  // ==================== CHAT MESSAGE OPERATIONS (offline-first) ====================
+
+  // Save a chat message locally
+  Future<void> saveChatMessage(ChatMessage message, {bool isSynced = false}) async {
+    final db = await database;
+    await db.insert(
+      'chat_messages',
+      {
+        'id': message.id,
+        'text': message.text,
+        'sender': message.sender,
+        'timestamp': message.timestamp.toIso8601String(),
+        'conversationId': message.conversationId,
+        'isSynced': isSynced ? 1 : 0,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  // Get messages for a conversation (oldest first)
+  Future<List<ChatMessage>> getConversationMessages(String conversationId) async {
+    final db = await database;
+    final maps = await db.query(
+      'chat_messages',
+      where: 'conversationId = ?',
+      whereArgs: [conversationId],
+      orderBy: 'timestamp ASC',
+    );
+    return maps.map((m) => ChatMessage.fromFirestore(m)).toList();
+  }
+
+  // Get all unsynced chat messages
+  Future<List<ChatMessage>> getUnsyncedMessages() async {
+    final db = await database;
+    final maps = await db.query(
+      'chat_messages',
+      where: 'isSynced = ?',
+      whereArgs: [0],
+      orderBy: 'timestamp ASC',
+    );
+    return maps.map((m) => ChatMessage.fromFirestore(m)).toList();
+  }
+
+  // Mark a chat message as synced
+  Future<void> markMessageSynced(String id) async {
+    final db = await database;
+    await db.update(
+      'chat_messages',
+      {'isSynced': 1},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // Delete messages for a conversation
+  Future<void> deleteConversationMessages(String conversationId) async {
+    final db = await database;
+    await db.delete(
+      'chat_messages',
+      where: 'conversationId = ?',
+      whereArgs: [conversationId],
+    );
+  }
+
+  // ==================== CONVERSATION OPERATIONS (offline-first) ====================
+
+  // Save a conversation locally
+  Future<void> saveConversation(ChatConversation conversation, {bool isSynced = false}) async {
+    final db = await database;
+    await db.insert(
+      'chat_conversations',
+      {
+        'id': conversation.id,
+        'title': conversation.title,
+        'createdAt': conversation.createdAt.toIso8601String(),
+        'lastMessageAt': conversation.lastMessageAt.toIso8601String(),
+        'lastMessage': conversation.lastMessage,
+        'isSynced': isSynced ? 1 : 0,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  // Get all conversations (newest first)
+  Future<List<ChatConversation>> getConversations() async {
+    final db = await database;
+    final maps = await db.query(
+      'chat_conversations',
+      orderBy: 'lastMessageAt DESC',
+    );
+    return maps.map((m) => ChatConversation.fromFirestore(m)).toList();
+  }
+
+  // Update conversation last message locally
+  Future<void> updateConversationLastMessage(
+    String conversationId,
+    String lastMessage,
+    DateTime lastMessageAt,
+  ) async {
+    final db = await database;
+    await db.update(
+      'chat_conversations',
+      {
+        'lastMessage': lastMessage,
+        'lastMessageAt': lastMessageAt.toIso8601String(),
+        'isSynced': 0, // Mark as needing sync
+      },
+      where: 'id = ?',
+      whereArgs: [conversationId],
+    );
+  }
+
+  // Update conversation title locally
+  Future<void> updateConversationTitle(String conversationId, String title) async {
+    final db = await database;
+    await db.update(
+      'chat_conversations',
+      {
+        'title': title,
+        'isSynced': 0,
+      },
+      where: 'id = ?',
+      whereArgs: [conversationId],
+    );
+  }
+
+  // Get all unsynced conversations
+  Future<List<ChatConversation>> getUnsyncedConversations() async {
+    final db = await database;
+    final maps = await db.query(
+      'chat_conversations',
+      where: 'isSynced = ?',
+      whereArgs: [0],
+    );
+    return maps.map((m) => ChatConversation.fromFirestore(m)).toList();
+  }
+
+  // Mark a conversation as synced
+  Future<void> markConversationSynced(String id) async {
+    final db = await database;
+    await db.update(
+      'chat_conversations',
+      {'isSynced': 1},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // Delete a conversation locally
+  Future<void> deleteConversation(String conversationId) async {
+    final db = await database;
+    await db.delete('chat_messages', where: 'conversationId = ?', whereArgs: [conversationId]);
+    await db.delete('chat_conversations', where: 'id = ?', whereArgs: [conversationId]);
   }
 }
