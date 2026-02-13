@@ -9,6 +9,9 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 // Import Firebase options
 import 'firebase_options.dart';
 
+// Import services
+import 'services/connectivity_service.dart';
+
 // Import screens
 import 'screens/auth/login_screen.dart';
 import 'screens/home/home_navigation.dart';
@@ -22,6 +25,9 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Initialize connectivity monitoring & auto-sync
+  await ConnectivityService().init();
 
   runApp(const MyApp());
 }
