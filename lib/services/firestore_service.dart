@@ -1,6 +1,7 @@
 // firestore_service.dart - Handles Firestore cloud database operations
 // Used for syncing data and storing chat messages
 
+import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/journal_entry.dart';
 import '../models/chat_message.dart';
@@ -112,16 +113,27 @@ class FirestoreService {
   // Get messages for a specific conversation
   Future<List<ChatMessage>> getConversationMessages(
       String conversationId) async {
-    if (_userId.isEmpty) return [];
+    if (_userId.isEmpty) {
+      debugPrint('Firestore: Cannot get messages - user not logged in');
+      return [];
+    }
 
-    final snapshot = await _chatCollection
-        .where('conversationId', isEqualTo: conversationId)
-        .orderBy('timestamp', descending: false)
-        .get();
+    try {
+      debugPrint('Firestore: Loading messages for conversation $conversationId');
+      final snapshot = await _chatCollection
+          .where('conversationId', isEqualTo: conversationId)
+          .orderBy('timestamp', descending: false)
+          .get();
 
-    return snapshot.docs.map((doc) {
-      return ChatMessage.fromFirestore(doc.data() as Map<String, dynamic>);
-    }).toList();
+      debugPrint('Firestore: Found ${snapshot.docs.length} messages');
+      
+      return snapshot.docs.map((doc) {
+        return ChatMessage.fromFirestore(doc.data() as Map<String, dynamic>);
+      }).toList();
+    } catch (e) {
+      debugPrint('Firestore: ERROR loading messages: $e');
+      rethrow; // Re-throw to let the calling code handle it
+    }
   }
 
   // Stream messages for a specific conversation (real-time)
