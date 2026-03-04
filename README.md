@@ -46,7 +46,7 @@ A cross-platform Flutter app that provides 24/7 emotional support through an AI-
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/your-username/ai_wellness_app.git
+   git clone https://github.com/chamithusithmaka/WellnessApp.git
    cd ai_wellness_app
    ```
 
